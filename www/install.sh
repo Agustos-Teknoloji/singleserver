@@ -168,24 +168,31 @@ detect_arch() {
 }
 
 install_cloudflared() {
-  if command -v cloudflared >/dev/null 2>&1; then
+  cloudflared_version="2026.10.3"
+  if command -v cloudflared >/dev/null 2>&1 &&
+    [ "$(cloudflared --version | awk '{print $3}')" = "$cloudflared_version" ]; then
     return 0
   fi
 
   case "$os_family" in
     debian)
       tmp_deb="/tmp/cloudflared-linux-${cloudflared_arch}.deb"
-      curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cloudflared_arch}.deb" -o "$tmp_deb"
+      curl -fsSL "https://github.com/cloudflare/cloudflared/releases/download/${cloudflared_version}/cloudflared-linux-${cloudflared_arch}.deb" -o "$tmp_deb"
       dpkg -i "$tmp_deb" || apt-get install -f -y
       rm -f "$tmp_deb"
       ;;
     amazon|rocky)
       tmp_bin="/tmp/cloudflared-linux-${binary_arch}"
-      curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${binary_arch}" -o "$tmp_bin"
+      curl -fsSL "https://github.com/cloudflare/cloudflared/releases/download/${cloudflared_version}/cloudflared-linux-${binary_arch}" -o "$tmp_bin"
       install -m 0755 "$tmp_bin" /usr/local/bin/cloudflared
       rm -f "$tmp_bin"
       ;;
   esac
+
+  # Replacing the binary does not update an already-running connector.
+  if systemctl is-active --quiet cloudflared-singleserver.service; then
+    systemctl restart cloudflared-singleserver.service
+  fi
 }
 
 # Presentation: a quiet, single-column checklist. Each step's verbose output goes
