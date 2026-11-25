@@ -24,8 +24,8 @@ func TestGeneratedDeployYAMLRetainContainersOnlyWithCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "\nretain_containers: 2\n") {
-		t.Fatalf("expected retain_containers: 2:\n%s", body)
+	if !strings.Contains(string(body), "\nretain_containers: 1\n") {
+		t.Fatalf("expected retain_containers: 1 (running + one previous):\n%s", body)
 	}
 
 	custom := AppConfig{Repo: "acme/web", CleanupAfterDeploy: true, RetainContainers: 3}
@@ -48,7 +48,7 @@ func TestCleanupConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.Apps[0].CleanupAfterDeploy || config.Apps[0].RetainContainers != 2 {
+	if !config.Apps[0].CleanupAfterDeploy || config.Apps[0].RetainContainers != 1 {
 		t.Fatalf("web: %+v", config.Apps[0])
 	}
 	if config.Apps[1].RetainContainers != 4 {
@@ -166,7 +166,7 @@ func TestPostDeployCleanupRunsKamalPruneThenBuilderPrune(t *testing.T) {
 	if err != nil {
 		t.Fatalf("kamal prune did not see a generated config/deploy.yml: %v", err)
 	}
-	if !strings.Contains(string(seen), "retain_containers: 2") {
+	if !strings.Contains(string(seen), "retain_containers: 1") {
 		t.Fatalf("generated config for prune lacks retain_containers:\n%s", seen)
 	}
 	if _, err := os.Stat(filepath.Join(app.RepoDir, "config", "deploy.yml")); !os.IsNotExist(err) {

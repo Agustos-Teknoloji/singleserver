@@ -42,8 +42,9 @@ type AppConfig struct {
 	// CleanupAfterDeploy prunes stopped containers, their unused images and
 	// old build cache after a successful deploy. Off by default.
 	CleanupAfterDeploy bool `yaml:"cleanup_after_deploy,omitempty"`
-	// RetainContainers is how many app containers Kamal keeps when pruning.
-	// Defaults to 2 (current + previous for rollback) when cleanup is on.
+	// RetainContainers is Kamal's retain_containers: how many stopped app
+	// containers prune keeps. The running container is never pruned, so the
+	// default of 1 keeps current + previous (for rollback) when cleanup is on.
 	RetainContainers int      `yaml:"retain_containers,omitempty"`
 	SecretEnvKeys    []string `yaml:"-"`
 }
@@ -170,7 +171,9 @@ func (a *AppConfig) Normalize() error {
 
 const defaultDeployTimeout = 10 * time.Minute
 
-const defaultRetainContainers = 2
+// defaultRetainContainers keeps one stopped container besides the running one.
+// Kamal only counts stopped containers toward retain_containers.
+const defaultRetainContainers = 1
 
 func (a AppConfig) DeployTimeoutDuration() time.Duration {
 	if parsed, err := time.ParseDuration(a.DeployTimeout); err == nil && parsed > 0 {
