@@ -39,7 +39,17 @@ type AppConfig struct {
 	StaticDir       string         `yaml:"static_dir,omitempty"`
 	DeployTimeout   string         `yaml:"deploy_timeout,omitempty"`
 	Storage         *StorageConfig `yaml:"storage,omitempty"`
-	SecretEnvKeys   []string       `yaml:"-"`
+	// CleanupAfterDeploy prunes stopped containers, their unused images and
+	// old build cache after a successful deploy. Off by default.
+	CleanupAfterDeploy bool `yaml:"cleanup_after_deploy,omitempty"`
+	// RetainContainers is Kamal's retain_containers: how many stopped app
+	// containers prune keeps. The running container is never pruned, so the
+	// default of 1 keeps current + previous (for rollback) when cleanup is on.
+	RetainContainers int `yaml:"retain_containers,omitempty"`
+	// RegistryKeepTags is how many of the newest image tags (besides latest)
+	// cleanup keeps in the local registry. Defaults to 10 when cleanup is on.
+	RegistryKeepTags int      `yaml:"registry_keep_tags,omitempty"`
+	SecretEnvKeys    []string `yaml:"-"`
 }
 
 type StorageConfig struct {
@@ -101,6 +111,18 @@ func (a *AppConfig) Normalize() error {
 			return fmt.Errorf("deploy_timeout for %s must be positive: %q", a.Repo, a.DeployTimeout)
 		}
 	}
+	if a.RetainContainers < 0 {
+		return fmt.Errorf("retain_containers for %s must be at least 1: %d", a.Repo, a.RetainContainers)
+	}
+	if a.CleanupAfterDeploy && a.RetainContainers == 0 {
+		a.RetainContainers = defaultRetainContainers
+	}
+	if a.RegistryKeepTags < 0 {
+		return fmt.Errorf("registry_keep_tags for %s must be at least 1: %d", a.Repo, a.RegistryKeepTags)
+	}
+	if a.CleanupAfterDeploy && a.RegistryKeepTags == 0 {
+		a.RegistryKeepTags = defaultRegistryKeepTags
+	}
 	if a.AppPort == 0 {
 		a.AppPort = 80
 	}
@@ -157,6 +179,14 @@ func (a *AppConfig) Normalize() error {
 }
 
 const defaultDeployTimeout = 10 * time.Minute
+
+// defaultRetainContainers keeps one stopped container besides the running one.
+// Kamal only counts stopped containers toward retain_containers.
+const defaultRetainContainers = 1
+
+// defaultRegistryKeepTags is how many recent image tags registry retention
+// keeps per app, on top of latest and the tags its containers use.
+const defaultRegistryKeepTags = 10
 
 func (a AppConfig) DeployTimeoutDuration() time.Duration {
 	if parsed, err := time.ParseDuration(a.DeployTimeout); err == nil && parsed > 0 {

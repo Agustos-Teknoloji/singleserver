@@ -309,7 +309,8 @@ WantedBy=multi-user.target
 UNIT_EOF
 
   if ! docker ps -a --format '{{.Names}}' | grep -qx singleserver-registry; then
-    docker run -d --restart=always --name singleserver-registry -p 127.0.0.1:5555:5000 registry:2
+    # Deletes let post-deploy cleanup (cleanup_after_deploy) trim old image tags.
+    docker run -d --restart=always --name singleserver-registry -e REGISTRY_STORAGE_DELETE_ENABLED=true -p 127.0.0.1:5555:5000 registry:2
   elif ! docker ps --format '{{.Names}}' | grep -qx singleserver-registry; then
     docker start singleserver-registry
   fi

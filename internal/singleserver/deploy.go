@@ -25,6 +25,10 @@ type DeployManager struct {
 
 	mu     sync.Mutex
 	queues map[string]chan DeployRequest
+
+	// docker and registryURL are overridden by tests.
+	docker      dockerCommandFunc
+	registryURL string
 }
 
 type DeployRequest struct {
@@ -95,6 +99,9 @@ func (m *DeployManager) run(req DeployRequest) (DeployTiming, error) {
 
 	_ = m.github.CreateCommitStatus(req.Repo, req.SHA, token, "success", fmt.Sprintf("Single Server deployed in %dms", timing.TotalMS))
 	m.logger.Printf("[deploy:%s] success total_ms=%d", req.RunID, timing.TotalMS)
+	if req.App.CleanupAfterDeploy {
+		m.cleanupAfterDeploy(req.App, req.RunID)
+	}
 	return timing, nil
 }
 
@@ -116,6 +123,16 @@ func (m *DeployManager) runKamal(req DeployRequest, token string) (DeployTiming,
 	generatedDockerfile, err := GeneratedDockerfile(req.App)
 	if err != nil {
 		return DeployTiming{}, err
+	}
+
+	// Wait for any registry garbage-collect (in this or another singleserver
+	// process) to finish before the deploy timeout starts, then hold the
+	// registry shared while Kamal pushes. If the lock can't be taken the
+	// deploy still runs; retention, which needs it exclusively, will not.
+	if release, lockErr := acquireRegistryLock(false); lockErr != nil {
+		m.logger.Printf("[deploy:%s] %v; deploying without it", req.RunID, lockErr)
+	} else {
+		defer release()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), req.App.DeployTimeoutDuration())
