@@ -253,6 +253,7 @@ func (d *fakeDocker) run(_ context.Context, args ...string) (string, error) {
 
 func newRetentionManager(t *testing.T, registry *fakeRegistry, docker *fakeDocker) (*DeployManager, *bytes.Buffer) {
 	t.Helper()
+	t.Setenv("SINGLESERVER_STATE_DIR", t.TempDir())
 	server := httptest.NewServer(registry)
 	t.Cleanup(server.Close)
 	var logs bytes.Buffer
@@ -382,5 +383,60 @@ func TestRegistryRetentionSourceHasNoUnsafeCommands(t *testing.T) {
 				t.Fatalf("registry_retention.go line %q contains %q", line, forbidden)
 			}
 		}
+	}
+}
+
+func TestRegistryLockExclusiveWaitsForSharedHolders(t *testing.T) {
+	t.Setenv("SINGLESERVER_STATE_DIR", t.TempDir())
+	// Each acquire opens its own file description, so this behaves like a
+	// daemon deploy and a CLI deploy in separate processes.
+	releaseShared, err := acquireRegistryLock(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseShared2, err := acquireRegistryLock(false)
+	if err != nil {
+		t.Fatal("two deploys must be able to push at once:", err)
+	}
+
+	acquired := make(chan func())
+	go func() {
+		release, err := acquireRegistryLock(true)
+		if err != nil {
+			t.Error(err)
+			close(acquired)
+			return
+		}
+		acquired <- release
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("retention took the registry lock while a deploy held it")
+	case <-time.After(200 * time.Millisecond):
+	}
+	releaseShared()
+	releaseShared2()
+	select {
+	case release := <-acquired:
+		if release == nil {
+			t.Fatal("exclusive acquire failed")
+		}
+		defer release()
+	case <-time.After(5 * time.Second):
+		t.Fatal("retention never got the registry lock")
+	}
+
+	blocked := make(chan struct{})
+	go func() {
+		release, err := acquireRegistryLock(false)
+		if err == nil {
+			release()
+		}
+		close(blocked)
+	}()
+	select {
+	case <-blocked:
+		t.Fatal("a deploy took the registry lock during retention")
+	case <-time.After(200 * time.Millisecond):
 	}
 }

@@ -59,10 +59,15 @@ func registryBaseURL() string {
 // logged; the deploy has already succeeded.
 func (m *DeployManager) registryRetention(app AppConfig, runID string) {
 	start := time.Now()
-	// Hold the registry lock exclusively: no deploy may push while manifests
-	// are deleted and blobs are garbage-collected.
-	m.registryMu.Lock()
-	defer m.registryMu.Unlock()
+	// Hold the registry lock exclusively: no deploy in any singleserver
+	// process may push while manifests are deleted and blobs are
+	// garbage-collected.
+	release, err := acquireRegistryLock(true)
+	if err != nil {
+		m.logger.Printf("[deploy:%s] registry retention failed: %v", runID, err)
+		return
+	}
+	defer release()
 
 	ctx, cancel := context.WithTimeout(context.Background(), registryRetentionLimit)
 	defer cancel()
