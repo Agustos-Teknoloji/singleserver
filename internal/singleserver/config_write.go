@@ -65,6 +65,7 @@ func appConfigEntry(app AppConfig) addAppEntry {
 		storage:         app.Storage,
 		cleanup:         app.CleanupAfterDeploy,
 		retain:          app.RetainContainers,
+		registryKeep:    app.RegistryKeepTags,
 	}
 	repoName := ""
 	if parts := strings.SplitN(app.Repo, "/", 2); len(parts) == 2 {

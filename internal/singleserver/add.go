@@ -97,6 +97,7 @@ type addAppEntry struct {
 	storage         *StorageConfig
 	cleanup         bool
 	retain          int
+	registryKeep    int
 }
 
 func cliAdd(args []string, w io.Writer, logger *log.Logger) error {
@@ -790,6 +791,9 @@ func (e addAppEntry) yamlNode() *yaml.Node {
 	if e.retain != 0 && !(e.cleanup && e.retain == defaultRetainContainers) {
 		appendScalarPair(node, "retain_containers", strconv.Itoa(e.retain))
 	}
+	if e.registryKeep != 0 && !(e.cleanup && e.registryKeep == defaultRegistryKeepTags) {
+		appendScalarPair(node, "registry_keep_tags", strconv.Itoa(e.registryKeep))
+	}
 	return node
 }
 
@@ -809,7 +813,8 @@ func (e addAppEntry) isScalar() bool {
 		e.deployTimeout == "" &&
 		e.storage == nil &&
 		!e.cleanup &&
-		e.retain == 0
+		e.retain == 0 &&
+		e.registryKeep == 0
 }
 
 func shouldWriteStaticDir(runtime, staticDir string) bool {

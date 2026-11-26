@@ -2,8 +2,8 @@ set -euo pipefail
 
 # Post-deploy cleanup. Runs only after a successful deploy and healthcheck.
 # Removes stopped app containers beyond retain_containers, the images only they
-# used, and build cache unused for 24h. It never touches Docker volumes, the
-# local registry's contents or /srv/storage.
+# used, and build cache unused for 24h. It never touches Docker volumes or
+# /srv/storage. Registry tags are trimmed separately (registry_retention.go).
 
 repo_dir="$SINGLESERVER_REPO_DIR"
 env_file="$SINGLESERVER_ENV_FILE"

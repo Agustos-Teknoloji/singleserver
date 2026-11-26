@@ -21,17 +21,20 @@ const postDeployCleanupTimeout = 10 * time.Minute
 // script against fake kamal/docker binaries.
 var postDeployCleanupShell = []string{"bash", "-lc"}
 
-// cleanupAfterDeploy prunes old containers, images and build cache once a
-// deploy has succeeded. It only logs failures: a deploy that passed its
+// cleanupAfterDeploy prunes old containers, images and build cache, then old
+// registry tags, once a deploy has succeeded. It only logs failures: a deploy that passed its
 // healthcheck stays successful even when cleanup fails.
 func (m *DeployManager) cleanupAfterDeploy(app AppConfig, runID string) {
 	start := time.Now()
 	summary, err := runPostDeployCleanup(app, runID, m.logger)
 	if err != nil {
 		m.logger.Printf("[deploy:%s] cleanup failed after %dms: %v", runID, time.Since(start).Milliseconds(), err)
-		return
+	} else {
+		m.logger.Printf("[deploy:%s] cleanup: %s duration_ms=%d", runID, summary, time.Since(start).Milliseconds())
 	}
-	m.logger.Printf("[deploy:%s] cleanup: %s duration_ms=%d", runID, summary, time.Since(start).Milliseconds())
+	// Registry retention is independent of the host cleanup above, so it runs
+	// even when that failed.
+	m.registryRetention(app, runID)
 }
 
 func runPostDeployCleanup(app AppConfig, runID string, logger *log.Logger) (string, error) {

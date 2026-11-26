@@ -5,7 +5,8 @@ apps:
     healthcheck: https://scoreboard.example.com/up
     # Prune old containers, images and build cache after each successful
     # deploy. Never touches volumes. Keeps the running container plus
-    # retain_containers stopped ones (default 1, for rollback).
+    # retain_containers stopped ones (default 1, for rollback), and the
+    # newest registry_keep_tags image tags in the local registry (default 10).
     cleanup_after_deploy: true
   - repo: acme/marketing-site
     branch: master

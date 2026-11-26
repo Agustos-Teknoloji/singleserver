@@ -3,6 +3,8 @@ package singleserver
 import (
 	"bytes"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,10 +139,18 @@ exit 0
 	return app, callLog
 }
 
+// emptyRegistryURL serves a registry with no repositories, so the registry
+// retention step that follows the host cleanup is a no-op in these tests.
+func emptyRegistryURL(t *testing.T) string {
+	server := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
 func TestPostDeployCleanupRunsKamalPruneThenBuilderPrune(t *testing.T) {
 	app, callLog := fakeCleanupEnv(t, 0)
 	var logs bytes.Buffer
-	m := &DeployManager{logger: log.New(&logs, "", 0)}
+	m := &DeployManager{logger: log.New(&logs, "", 0), registryURL: emptyRegistryURL(t)}
 
 	m.cleanupAfterDeploy(app, "run-1")
 
@@ -181,7 +191,7 @@ func TestPostDeployCleanupRunsKamalPruneThenBuilderPrune(t *testing.T) {
 func TestPostDeployCleanupFailureIsOnlyLogged(t *testing.T) {
 	app, callLog := fakeCleanupEnv(t, 1)
 	var logs bytes.Buffer
-	m := &DeployManager{logger: log.New(&logs, "", 0)}
+	m := &DeployManager{logger: log.New(&logs, "", 0), registryURL: emptyRegistryURL(t)}
 
 	// cleanupAfterDeploy has no return value: a failing cleanup cannot turn a
 	// successful deploy into a failed one. It must log and stop.

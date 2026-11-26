@@ -25,6 +25,14 @@ type DeployManager struct {
 
 	mu     sync.Mutex
 	queues map[string]chan DeployRequest
+
+	// registryMu guards the shared local registry: deploys hold it shared
+	// while Kamal builds and pushes, and registry retention holds it
+	// exclusively while it deletes manifests and garbage-collects blobs.
+	registryMu sync.RWMutex
+	// docker and registryURL are overridden by tests.
+	docker      dockerCommandFunc
+	registryURL string
 }
 
 type DeployRequest struct {
@@ -120,6 +128,11 @@ func (m *DeployManager) runKamal(req DeployRequest, token string) (DeployTiming,
 	if err != nil {
 		return DeployTiming{}, err
 	}
+
+	// Wait for any registry garbage-collect to finish before the deploy
+	// timeout starts, then keep the registry shared while Kamal pushes.
+	m.registryMu.RLock()
+	defer m.registryMu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), req.App.DeployTimeoutDuration())
 	defer cancel()
