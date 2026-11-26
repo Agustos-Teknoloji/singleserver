@@ -120,7 +120,7 @@ func (r *registryRetentionRun) run(ctx context.Context, repo string, keepRecent 
 		return "no tags in registry repo " + repo, nil
 	}
 
-	pinnedTags, pinnedDigests, err := containerImagePins(ctx, r.docker, repo)
+	pinnedTags, pinnedDigests, err := containerImagePins(ctx, r.docker, repo, r.logf)
 	if err != nil {
 		// Without knowing what the containers run, deleting anything is unsafe.
 		return "", fmt.Errorf("find container images: %w", err)
@@ -339,8 +339,10 @@ func planRegistryRetention(tags []registryTag, keepRecent int, pinnedTags, pinne
 }
 
 // containerImagePins returns the registry tags and digests used by the app's
-// running containers and its newest stopped container.
-func containerImagePins(ctx context.Context, docker dockerCommandFunc, repo string) (map[string]bool, map[string]bool, error) {
+// running containers and its newest stopped container. A container whose image
+// is no longer in the local store (removed by an image prune) is pinned only by
+// the tag or digest in its own image reference; any other inspect error fails.
+func containerImagePins(ctx context.Context, docker dockerCommandFunc, repo string, logf func(format string, args ...any)) (map[string]bool, map[string]bool, error) {
 	out, err := docker(ctx, "ps", "-a", "--filter", "label=service="+repo, "--format", "{{.State}}\t{{.Image}}")
 	if err != nil {
 		return nil, nil, fmt.Errorf("docker ps: %w: %s", err, lastLines(out, 3))
@@ -372,6 +374,12 @@ func containerImagePins(ctx context.Context, docker dockerCommandFunc, repo stri
 		}
 		out, err := docker(ctx, "image", "inspect", "--format", "{{range .RepoDigests}}{{println .}}{{end}}", image)
 		if err != nil {
+			if isNoSuchImage(out) {
+				if logf != nil {
+					logf("warning: image %s of a container is gone locally; pinning only its own reference", image)
+				}
+				continue
+			}
 			return nil, nil, fmt.Errorf("docker image inspect %s: %w: %s", image, err, lastLines(out, 3))
 		}
 		for _, ref := range strings.Fields(out) {
@@ -381,6 +389,12 @@ func containerImagePins(ctx context.Context, docker dockerCommandFunc, repo stri
 		}
 	}
 	return tags, digests, nil
+}
+
+// isNoSuchImage reports whether docker output says the image is not in the
+// local image store.
+func isNoSuchImage(out string) bool {
+	return strings.Contains(strings.ToLower(out), "no such image")
 }
 
 // imageRefTagOrDigest parses an image reference such as

@@ -224,8 +224,10 @@ type fakeDocker struct {
 	calls   []string
 	ps      string
 	inspect map[string]string
-	failGC  bool
-	failPS  bool
+	// inspectErr maps an image to the output of a failing image inspect.
+	inspectErr map[string]string
+	failGC     bool
+	failPS     bool
 }
 
 func (d *fakeDocker) run(_ context.Context, args ...string) (string, error) {
@@ -239,6 +241,9 @@ func (d *fakeDocker) run(_ context.Context, args ...string) (string, error) {
 		}
 		return d.ps, nil
 	case args[0] == "image" && args[1] == "inspect":
+		if out, ok := d.inspectErr[args[len(args)-1]]; ok {
+			return out, errors.New("exit status 1")
+		}
 		return d.inspect[args[len(args)-1]], nil
 	case args[0] == "inspect":
 		return `["/etc/docker/registry/config.yml"]`, nil
@@ -362,6 +367,64 @@ func TestRegistryRetentionDeletesNothingWhenContainersUnknown(t *testing.T) {
 
 	if len(registry.deleted) != 0 {
 		t.Fatalf("deleted %v without knowing container images", registry.deleted)
+	}
+	if !strings.Contains(logs.String(), "registry retention failed") {
+		t.Fatalf("missing failure log:\n%s", logs.String())
+	}
+}
+
+func TestRegistryRetentionSkipsContainerWhoseImageIsGone(t *testing.T) {
+	registry := newFakeRegistry("web", 14, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	docker := &fakeDocker{
+		// The running container's image is present; the newest stopped
+		// container's image was pruned locally.
+		ps: "running\t127.0.0.1:5555/web:sha02\nexited\t127.0.0.1:5555/web:sha03\n",
+		inspect: map[string]string{
+			"127.0.0.1:5555/web:sha02": "127.0.0.1:5555/web@" + digestOf("idx-sha02") + "\n",
+		},
+		inspectErr: map[string]string{
+			"127.0.0.1:5555/web:sha03": "Error: No such image: 127.0.0.1:5555/web:sha03",
+		},
+	}
+	m, logs := newRetentionManager(t, registry, docker)
+
+	m.registryRetention(AppConfig{Name: "web", RegistryKeepTags: 10}, "run-r5")
+
+	if strings.Contains(logs.String(), "registry retention failed") {
+		t.Fatalf("retention must not fail on a missing image:\n%s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "image 127.0.0.1:5555/web:sha03 of a container is gone locally") {
+		t.Fatalf("missing warning for the gone image:\n%s", logs.String())
+	}
+	// sha02 stays pinned by the running container, sha03 by the stopped
+	// container's own tag; only sha01 and sha04 are old and unpinned.
+	for _, kept := range []string{"sha02", "sha03", "sha05", "sha14", "latest"} {
+		if _, ok := registry.tags[kept]; !ok {
+			t.Fatalf("tag %s should still exist", kept)
+		}
+	}
+	for _, gone := range []string{"sha01", "sha04"} {
+		if _, ok := registry.tags[gone]; ok {
+			t.Fatalf("tag %s should have been deleted", gone)
+		}
+	}
+	assertSafeDockerCalls(t, docker.calls)
+}
+
+func TestRegistryRetentionDeletesNothingWhenImageInspectFails(t *testing.T) {
+	registry := newFakeRegistry("web", 12, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	docker := &fakeDocker{
+		ps: "running\t127.0.0.1:5555/web:sha02\n",
+		inspectErr: map[string]string{
+			"127.0.0.1:5555/web:sha02": "Cannot connect to the Docker daemon",
+		},
+	}
+	m, logs := newRetentionManager(t, registry, docker)
+
+	m.registryRetention(AppConfig{Name: "web", RegistryKeepTags: 10}, "run-r6")
+
+	if len(registry.deleted) != 0 {
+		t.Fatalf("deleted %v although an image inspect failed", registry.deleted)
 	}
 	if !strings.Contains(logs.String(), "registry retention failed") {
 		t.Fatalf("missing failure log:\n%s", logs.String())
